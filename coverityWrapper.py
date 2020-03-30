@@ -32,7 +32,7 @@ class FastDesktopWrapper:
         self.fileCache={}
         self.context=3
         try:
-            opts, args = getopt.getopt(sys.argv[1:], 'd:c:l:f:q', ['dir=',"configFile=","enableQuality","limitResults=","file=","skipAnalysis","skipBuild","checker=","context=","output=","outputFile=","generatePragma"])
+            opts, args = getopt.getopt(sys.argv[1:], 'd:c:l:i:q', ['dir=',"configFile=","enableQuality","limitResults=","includeFiles=","skipAnalysis","skipBuild","checker=","context=","output=","outputFile=","generatePragma"])
         except getopt.GetoptError:
             self.usage()
             sys.exit(2)
@@ -51,7 +51,7 @@ class FastDesktopWrapper:
                 self.enableQuality=True
             elif opt in ('--l', '--limitResults'):
                 self.limitResults=arg
-            elif opt in ('-f', '--file'):
+            elif opt in ('-i', '--includeFiles'):
                 self.fileFilter=arg
             elif opt in ('--skipAnalysis'):
                 self.skipAnalysis=True
@@ -77,9 +77,28 @@ class FastDesktopWrapper:
 
     def usage(self):
 
-        print("coverityWrapper.py:")
-        print("")
-
+        help = """
+coverityWrapper.py:
+This script wraps Coverity Build, Analyse and Format Errors.
+NOTE: The cov-* tools must be in the path
+Syntax: coverityWrapper.py <options> <build command>
+where:
+<build commnand> is the build command to build the appliation
+<options>: 
+--dir <dir>              : (Optional) Specify the intermediate directory used to store the Coverity information in
+--config|-c <file>       : (Optional) Specify the Coding standard config file to use for analysis
+--quiet|-q               : (Optional) Disable output of standard out for the build and analyse setp, set automatically when using emacs output
+--includeFiles|-i <file> : (Optional) Filter results on filename regex
+--enableQuality          : (Optional) Enable quality checkers
+--skipBuild              : (Optional) Skip the build phase
+--skipAnalysis           : (Optional) Skip the analysis phase (also skips the build phase)
+--context <num of lines> : (Optional) limits the number of lines around events, defaults to 3, 0 to remove context
+--checker <checker>      : (Optional) limits results based on checker regex. ONLY WORKS WITH JSON OUTPUT!!!!
+--generatePragmas        : (Optional) (Experimental) Generates a file (stored next to the source file) containing the pragma required to suppress  issues
+--output <output type>   : (Optional) Choose from emacs, pretty, json and html. 
+--outputFile <file|dir>  : (Optional) Specify the output file or dir for json and html mode respectively. Defaults to "pretty"
+"""
+        print(help)
 
     def doBuild(self):
         # Call cov build
@@ -116,11 +135,15 @@ class FastDesktopWrapper:
 
     def doFormatErrors(self):
 
+        command=["cov-format-errors","--dir",self.idir]
+        if self.fileFilter:
+            command.extend(["--include-files", self.fileFilter])
+
         if self.outputType=="pretty" or self.outputType=="json" :
             if not self.outputFile:
                 self.outputFile="results.json"
             # Call cov-format-errors
-            command=["cov-format-errors","--dir",self.idir,"--json-output-v7",self.outputFile]
+            command.extend(["--json-output-v7",self.outputFile])
             try:
                 result=subprocess.check_output(command,stderr=subprocess.STDOUT)
             except subprocess.CalledProcessError as e:
@@ -133,16 +156,14 @@ class FastDesktopWrapper:
             if not self.outputFile:
                 self.outputFile = "html_output"
             print("Generating html format (this may take a while!)")
-            command=["cov-format-errors","--dir",self.idir,"--html-output",self.outputFile]
+            command.extend(["--html-output",self.outputFile])
             try:
                 result=subprocess.check_output(command,stderr=subprocess.STDOUT)
             except subprocess.CalledProcessError as e:
                 logging.debug("Non zero exit :"+str(e.output)+" "+str(e.returncode))
         elif self.outputType == "emacs":
 
-            command = ["cov-format-errors", "--dir", self.idir, "--emacs-style"]
-            if self.fileFilter:
-                command.extend(["--file",self.fileFilter])
+            command.append("--emacs-style")
             try:
                 process = subprocess.Popen(command, stderr=subprocess.STDOUT, stdout=subprocess.PIPE)
                 for line in iter(process.stdout.readline, b''):
@@ -162,11 +183,6 @@ class FastDesktopWrapper:
         # Iterate through errors
         print("Found "+str(len(self.jsonData['issues']))+" issues")
         for issue in self.jsonData['issues']:
-            if self.fileFilter:
-                pattern=re.compile(self.fileFilter)
-                matched=pattern.search(issue['strippedMainEventFilePathname'])
-                if not matched:
-                    continue
             if self.checkerFilter:
                 pattern = re.compile(self.checkerFilter)
                 matched = pattern.search(issue['checkerName'])
